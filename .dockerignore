@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+
+# Ignore raw/training data, keep only the clean mapping used at runtime
+data/raw_addresses.csv
+data/indian_address_dataset.csv
+data/pincode_raw.csv
+
+# Ignore training scripts
+src/generate_data.py
+src/train.py
