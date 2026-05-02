@@ -96,8 +96,26 @@ ALPHAPIN_RE      = re.compile(r"\b[A-Z0-9]{5,7}\b")  # like "4000AB"
 _COMMA_PIN_RE   = re.compile(r"\b(\d{3}),(\d{3})\b")   # 160,015  → 160015
 _DASH_PIN_RE    = re.compile(r"\b(\d{3})-(\d{3})\b")   # 160-015  → 160015
 _SPACE_PIN_RE   = re.compile(r"\b(\d{3})\s(\d{3})\b")  # 160 015  → 160015
+_WORD_PIN_RE    = re.compile(r"([a-zA-Z])(\d{6})\b")   # pradesh201002 → pradesh 201002
 _MULTI_SPACE_RE = re.compile(r"  +")                    # 2+ spaces → single
 _TRAILING_COMMA = re.compile(r",\s*,")                  # double commas
+
+_STATE_FIXES = {
+    "uttarpradesh": "uttar pradesh",
+    "madhyapradesh": "madhya pradesh",
+    "andhrapradesh": "andhra pradesh",
+    "himachalpradesh": "himachal pradesh",
+    "arunachalpradesh": "arunachal pradesh",
+    "tamilnadu": "tamil nadu",
+    "westbengal": "west bengal",
+    "newdelhi": "new delhi",
+    "jammuandkashmir": "jammu and kashmir"
+}
+
+_PROPERTY_IDENTIFIERS_RE = re.compile(
+    r"\b(ho|house|hse|h\.?|flat|flt|f\.?|plot|plt|p\.?|phase|ph\.?|room|r\.?|door|d\.?|shop|sh\.?|office|off\.?|unit|u\.?|ward|w\.?)\s*no\b\.?",
+    re.IGNORECASE
+)
 
 def _auto_correct(address: str) -> tuple[str, list[str]]:
     """
@@ -129,6 +147,25 @@ def _auto_correct(address: str) -> tuple[str, list[str]]:
             return merged
         return m.group()
     corrected = _SPACE_PIN_RE.sub(_fix_space_pin, corrected)
+
+    # 4. Pincode merged with text
+    if _WORD_PIN_RE.search(corrected):
+        corrected = _WORD_PIN_RE.sub(r"\1 \2", corrected)
+        fixes.append("separated pincode from word")
+
+    # 4.5 State missing spaces
+    for bad, good in _STATE_FIXES.items():
+        pattern = re.compile(rf"\b{bad}\b", re.IGNORECASE)
+        if pattern.search(corrected):
+            corrected = pattern.sub(good, corrected)
+            if f"added space to '{good}'" not in fixes:
+                fixes.append(f"added space to '{good}'")
+
+    # 4.6 Normalize house/property identifiers
+    if _PROPERTY_IDENTIFIERS_RE.search(corrected):
+        corrected = _PROPERTY_IDENTIFIERS_RE.sub("h.no.", corrected)
+        if "normalized house/property identifier" not in fixes:
+            fixes.append("normalized house/property identifier")
 
     # 4. Collapse multiple spaces
     single_spaced = _MULTI_SPACE_RE.sub(" ", corrected).strip()

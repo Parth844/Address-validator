@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import classification_report, accuracy_score
 from xgboost import XGBClassifier
-from features import extract_features
+from src.features import extract_features
 
 # =========================
 # 1. LOAD DATA
