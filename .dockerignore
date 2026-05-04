@@ -12,3 +12,4 @@ data/pincode_raw.csv
 # Ignore training scripts
 src/generate_data.py
 src/train.py
+data/indian_addresses_100k.csv

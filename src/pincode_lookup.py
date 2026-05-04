@@ -58,6 +58,18 @@ ADDITIONAL_CITIES = {
 for c in ADDITIONAL_CITIES:
     ALL_DISTRICTS.add(c)
 
+CITY_STATE_TO_PINCODE = {}
+df["state"] = df["state"].fillna("").astype(str).str.lower().str.strip()
+for p, d, s in zip(df["pincode"], df["district"], df["state"]):
+    if not p or not d or not s:
+        continue
+    for term in [d] + [w for w in d.split() if w not in {"urban", "rural", "east", "west", "north", "south", "central"}]:
+        if len(term) >= 3:
+            key = (term, s)
+            if key not in CITY_STATE_TO_PINCODE:
+                CITY_STATE_TO_PINCODE[key] = []
+            if p not in CITY_STATE_TO_PINCODE[key]:
+                CITY_STATE_TO_PINCODE[key].append(p)
 
 def lookup_pincode(pincode: str):
     """

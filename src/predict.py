@@ -2,7 +2,7 @@ import re
 import joblib
 import numpy as np
 from difflib import get_close_matches
-from .pincode_lookup import validate_pincode_against_address, lookup_pincode, lookup_pincode_districts, ALL_DISTRICTS
+from .pincode_lookup import validate_pincode_against_address, lookup_pincode, lookup_pincode_districts, ALL_DISTRICTS, CITY_STATE_TO_PINCODE
 from src.features import extract_features
 from src.state_list import STATE_LIST
 model      = joblib.load("models/model.pkl")
@@ -472,11 +472,54 @@ def rule_state_city_cross_check(text: str, raw: str):
         ), 0.75
     return False, "", 0.0
 
+OTHER_COUNTRIES = {
+    "afghanistan", "albania", "algeria", "andorra", "angola", "antigua and barbuda",
+    "argentina", "armenia", "australia", "austria", "azerbaijan", "bahamas",
+    "bahrain", "bangladesh", "barbados", "belarus", "belgium", "belize",
+    "benin", "bhutan", "bolivia", "bosnia and herzegovina", "botswana", "brazil",
+    "brunei", "bulgaria", "burkina faso", "burundi", "cabo verde", "cambodia",
+    "cameroon", "canada", "central african republic", "chad", "chile", "china",
+    "colombia", "comoros", "congo", "costa rica", "cote d'ivoire", "croatia",
+    "cuba", "cyprus", "czechia", "czech republic", "denmark", "djibouti", "dominica",
+    "dominican republic", "ecuador", "egypt", "el salvador", "equatorial guinea",
+    "eritrea", "estonia", "eswatini", "ethiopia", "fiji", "finland", "france",
+    "gabon", "gambia", "georgia", "germany", "ghana", "greece", "grenada",
+    "guatemala", "guinea", "guinea-bissau", "guyana", "haiti", "honduras",
+    "hungary", "iceland", "indonesia", "iran", "iraq", "ireland", "israel",
+    "italy", "jamaica", "japan", "jordan", "kazakhstan", "kenya", "kiribati",
+    "north korea", "south korea", "kosovo", "kuwait", "kyrgyzstan", "laos",
+    "latvia", "lebanon", "lesotho", "liberia", "libya", "liechtenstein", "lithuania",
+    "luxembourg", "madagascar", "malawi", "malaysia", "maldives", "mali", "malta",
+    "marshall islands", "mauritania", "mauritius", "mexico", "micronesia", "moldova",
+    "monaco", "mongolia", "montenegro", "morocco", "mozambique", "myanmar",
+    "namibia", "nauru", "nepal", "netherlands", "new zealand", "nicaragua", "niger",
+    "nigeria", "north macedonia", "norway", "oman", "pakistan", "palau", "palestine",
+    "panama", "papua new guinea", "paraguay", "peru", "philippines", "poland",
+    "portugal", "qatar", "romania", "russia", "rwanda", "saint kitts and nevis",
+    "saint lucia", "saint vincent and the grenadines", "samoa", "san marino",
+    "sao tome and principe", "saudi arabia", "senegal", "serbia", "seychelles",
+    "sierra leone", "singapore", "slovakia", "slovenia", "solomon islands",
+    "somalia", "south africa", "south sudan", "spain", "sri lanka", "sudan",
+    "suriname", "sweden", "switzerland", "syria", "taiwan", "tajikistan",
+    "tanzania", "thailand", "timor-leste", "togo", "tonga", "trinidad and tobago",
+    "tunisia", "turkey", "turkmenistan", "tuvalu", "uganda", "ukraine",
+    "united arab emirates", "uae", "dubai", "united kingdom", "uk", "united states",
+    "usa", "uruguay", "uzbekistan", "vanuatu", "vatican city", "venezuela",
+    "vietnam", "yemen", "zambia", "zimbabwe"
+}
+
+def rule_non_india_country(text: str, raw: str):
+    """If any other country than India is mentioned, penalty is 1.0."""
+    for country in OTHER_COUNTRIES:
+        if re.search(rf"\b{re.escape(country)}\b", text.lower()):
+            return True, f"Non-India country found in address: {country.title()}", 1.0
+    return False, "", 0.0
 
 # All rules in priority order (hard blocks first, soft penalties later)
 # Note: pincode formatting glitches (comma/dash/space in pin) are handled
 # upstream by _auto_correct() before rules run — no rule needed here.
 RULES = [
+    rule_non_india_country,
     rule_garbage,
     rule_no_alpha,
     rule_too_many_digits,
@@ -567,6 +610,10 @@ def predict(address: str) -> dict:
 
             if warning:
                 rule_warnings.append(warning)
+
+            if penalty == 1.0:
+                is_critical = True
+                critical_reason = reason
         
             # multiplicative stacking
             total_penalty = 1 - ((1 - total_penalty) * (1 - penalty))
@@ -628,6 +675,84 @@ def predict(address: str) -> dict:
         if corrections:
             reason += f". Auto-corrections applied: {'; '.join(corrections)}"
 
+    def _case_insensitive_replace(text, old_sub, new_sub):
+        pattern = re.compile(re.escape(old_sub), re.IGNORECASE)
+        return pattern.sub(new_sub, text)
+
+    suggestions_list = []
+    pins = PINCODE_RE.findall(text)
+    if pins:
+        pin = pins[0]
+        db_states = lookup_pincode(pin)
+        db_districts = lookup_pincode_districts(pin)
+
+        has_city_change = False
+        has_state_change = False
+
+        detected_states = _detect_states_fuzzy(text)
+        if detected_states and db_states:
+            valid_states_l = [s.lower() for s in db_states]
+            for ds in detected_states:
+                if ds.lower() not in valid_states_l:
+                    has_state_change = True
+
+        detected_locations = set()
+        for loc in ALL_DISTRICTS:
+            if re.search(rf"\b{re.escape(loc)}\b", text):
+                detected_locations.add(loc)
+
+        valid_districts_l = {d.lower() for d in db_districts}
+        for dist in db_districts:
+            if dist in COMMON_SYNONYMS:
+                valid_districts_l.add(COMMON_SYNONYMS[dist])
+
+        mismatched_loc = None
+        for loc in detected_locations:
+            if loc not in valid_districts_l and loc not in {s.lower() for s in STATE_LIST}:
+                mismatched_loc = loc
+                break
+
+        if mismatched_loc and db_districts:
+            has_city_change = True
+
+        if has_city_change or has_state_change:
+            fixed_address_option_1 = raw
+            if has_city_change:
+                orig_case_loc = mismatched_loc
+                for word in raw.split():
+                    if word.lower().strip(",.;") == mismatched_loc.lower():
+                        orig_case_loc = word.strip(",.;")
+                        break
+                fixed_address_option_1 = _case_insensitive_replace(fixed_address_option_1, orig_case_loc, list(db_districts)[0].title())
+            if has_state_change:
+                for ds in detected_states:
+                    if ds.lower() not in [s.lower() for s in db_states]:
+                        fixed_address_option_1 = _case_insensitive_replace(fixed_address_option_1, ds, db_states[0])
+
+            suggestions_list.append({
+                "type": "corrected_city_and_state",
+                "suggested_city": list(db_districts)[0].title() if has_city_change else None,
+                "suggested_state": db_states[0] if has_state_change else None,
+                "suggested_address": fixed_address_option_1
+            })
+
+        if detected_locations and detected_states:
+            correct_pins = []
+            for ds in detected_states:
+                for loc in detected_locations:
+                    key = (loc.lower(), ds.lower())
+                    if key in CITY_STATE_TO_PINCODE:
+                        correct_pins.extend(CITY_STATE_TO_PINCODE[key])
+
+            if correct_pins and pin not in correct_pins:
+                new_pin = correct_pins[0]
+                fixed_address_option_2 = _case_insensitive_replace(raw, pin, new_pin)
+                suggestions_list.append({
+                    "type": "corrected_pincode",
+                    "suggested_pincode": new_pin,
+                    "suggested_address": fixed_address_option_2
+                })
+
     return {
         "address": raw,
         "corrected_address": corrected if was_corrected else None,
@@ -639,8 +764,9 @@ def predict(address: str) -> dict:
         "confidence": _confidence_band(adjusted_prob),
         "reason": reason,
         "rules_triggered": triggered_rules,
-        "warnings": rule_warnings,   # ✅ ADD THIS
+        "warnings": rule_warnings,
         "source": "ml+rules",
+        "suggestions": suggestions_list if suggestions_list else None,
     }
 
 
