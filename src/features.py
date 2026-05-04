@@ -1,7 +1,7 @@
 import re
 import numpy as np
 import pandas as pd
-
+from src.state_list import STATE_LIST
 # =========================
 # LOAD GEO DATA (once)
 # =========================

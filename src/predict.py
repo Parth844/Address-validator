@@ -2,7 +2,7 @@ import re
 import joblib
 import numpy as np
 from difflib import get_close_matches
-from .pincode_lookup import validate_pincode_against_address, lookup_pincode
+from .pincode_lookup import validate_pincode_against_address, lookup_pincode, lookup_pincode_districts, ALL_DISTRICTS
 from src.features import extract_features
 from src.state_list import STATE_LIST
 model      = joblib.load("models/model.pkl")
@@ -322,6 +322,68 @@ def rule_state_pincode_mismatch(text: str, raw: str):
 
     return False, "", 0.0
 
+COMMON_SYNONYMS = {
+    "bangalore": "bengaluru",
+    "bengaluru": "bangalore",
+    "gurgaon": "gurugram",
+    "gurugram": "gurgaon",
+    "bombay": "mumbai",
+    "calcutta": "kolkata",
+    "madras": "chennai",
+    "orissa": "odisha",
+    "trivandrum": "thiruvananthapuram",
+    "cochin": "kochi",
+    "baroda": "vadodara",
+    "waltair": "visakhapatnam",
+    "vizag": "visakhapatnam",
+    "pondicherry": "puducherry"
+}
+
+def rule_city_pincode_mismatch(text: str, raw: str):
+    """
+    Check if the city or district mentioned in the address matches the pincode's district.
+    """
+    pins = PINCODE_RE.findall(text)
+    if not pins:
+        return False, "", 0.0
+
+    pin = pins[0]
+    db_districts = lookup_pincode_districts(pin)
+    if not db_districts:
+        return False, "", 0.0
+
+    # find which of our ALL_DISTRICTS are mentioned in the address
+    detected_locations = set()
+    for loc in ALL_DISTRICTS:
+        if loc in text:
+            detected_locations.add(loc)
+            # Also add its known synonyms!
+            if loc in COMMON_SYNONYMS:
+                detected_locations.add(COMMON_SYNONYMS[loc])
+
+    # If the address doesn't mention any city or district from the database,
+    # then there is no conflict! (User might just not have written the city).
+    if not detected_locations:
+        return False, "", 0.0
+
+    # Let's normalize the districts from the database as well to check matches.
+    valid_locations = set(db_districts)
+    for dist in db_districts:
+        if dist in COMMON_SYNONYMS:
+            valid_locations.add(COMMON_SYNONYMS[dist])
+
+    # If any detected location matches any valid location for the pincode, then no mismatch.
+    if any(loc in valid_locations for loc in detected_locations):
+        return False, "", 0.0
+
+    # Otherwise, the user mentioned a different city/district than the pincode belongs to.
+    detected_list = sorted(list(detected_locations))[:3]
+    valid_list = sorted(list(db_districts))[:3]
+    return True, (
+        f"City/district '{detected_list[0]}' found in address, but pincode {pin} "
+        f"belongs to {valid_list}."
+    ), 0.80, "PINCODE_MISMATCH"
+
 def rule_missing_house_number(text: str, raw: str):
     """No house/flat/plot identifier at all."""
     if not HOUSE_RE.search(text) and not re.search(r"\b\d+[a-z]?\b", text):
@@ -424,6 +486,7 @@ RULES = [
 
     rule_multiple_states,
     rule_state_pincode_mismatch,     # ✅ FIRST (accurate)
+    rule_city_pincode_mismatch,
 
     #rule_pincode_prefix_mismatch,    # ✅ fallback
 
