@@ -585,7 +585,6 @@ def predict(address: str) -> dict:
 
     # ── Step 2: Run rule engine on corrected address ──────────────────────────
     triggered_rules = []
-    total_penalty   = 0.0
     is_critical     = False
     critical_reason = ""
     rule_warnings = []
@@ -639,12 +638,13 @@ def predict(address: str) -> dict:
     X_tfidf = vectorizer.transform([corrected])
 
     # Define X_num FIRST
-    X_num = np.array(extract_features(corrected)).reshape(1, -1)
+    
 
     # Then combine
+
     X = np.hstack([X_tfidf.toarray(), X_num])
 
-    # Predict
+    # PredictX_num = np.array(extract_features(corrected)).reshape(1, -1)
     proba   = model.predict_proba(X)[0]
     ml_prob = float(proba[1])
 
@@ -653,7 +653,8 @@ def predict(address: str) -> dict:
 
 
 
-    # Slightly higher threshold when any soft rule fired
+    # Slightly higher threshold 
+    
     if total_penalty > 0.6:
         threshold = 0.72
     elif total_penalty > 0.3:
