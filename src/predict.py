@@ -2,7 +2,7 @@ import re
 import joblib
 import numpy as np
 from difflib import get_close_matches
-from .pincode_lookup import validate_pincode_against_address, lookup_pincode, lookup_pincode_districts, ALL_DISTRICTS, CITY_STATE_TO_PINCODE
+from .pincode_lookup import validate_pincode_against_address, lookup_pincode, lookup_pincode_districts, ALL_LOCATIONS, CITY_STATE_TO_PINCODE
 from src.features import extract_features
 from src.state_list import STATE_LIST
 model      = joblib.load("models/model.pkl")
@@ -352,14 +352,16 @@ def rule_city_pincode_mismatch(text: str, raw: str):
     if not db_districts:
         return False, "", 0.0
 
-    # find which of our ALL_DISTRICTS are mentioned in the address
+    # Optimized search for known locations in text (Fixes 5000ms latency issue)
+    words = re.findall(r"\w+", text.lower())
     detected_locations = set()
-    for loc in ALL_DISTRICTS:
-        if loc in text:
-            detected_locations.add(loc)
-            # Also add its known synonyms!
-            if loc in COMMON_SYNONYMS:
-                detected_locations.add(COMMON_SYNONYMS[loc])
+    for n in [1, 2, 3]:
+        for i in range(len(words) - n + 1):
+            ngram = " ".join(words[i:i+n])
+            if ngram in ALL_LOCATIONS:
+                detected_locations.add(ngram)
+                if ngram in COMMON_SYNONYMS:
+                    detected_locations.add(COMMON_SYNONYMS[ngram])
 
     # If the address doesn't mention any city or district from the database,
     # then there is no conflict! (User might just not have written the city).
@@ -640,11 +642,13 @@ def predict(address: str) -> dict:
     # Define X_num FIRST
     
 
-    # Then combine
+    # Extract numerical features
+    X_num = np.array(extract_features(corrected)).reshape(1, -1)
 
+    # Combine with TF-IDF
     X = np.hstack([X_tfidf.toarray(), X_num])
 
-    # PredictX_num = np.array(extract_features(corrected)).reshape(1, -1)
+    # Predict
     proba   = model.predict_proba(X)[0]
     ml_prob = float(proba[1])
 
@@ -697,10 +701,14 @@ def predict(address: str) -> dict:
                 if ds.lower() not in valid_states_l:
                     has_state_change = True
 
+        # Optimized search for known locations in text
+        words_list = re.findall(r"\w+", text.lower())
         detected_locations = set()
-        for loc in ALL_DISTRICTS:
-            if re.search(rf"\b{re.escape(loc)}\b", text):
-                detected_locations.add(loc)
+        for n in [1, 2, 3]:
+            for i in range(len(words_list) - n + 1):
+                ngram = " ".join(words_list[i:i+n])
+                if ngram in ALL_LOCATIONS:
+                    detected_locations.add(ngram)
 
         valid_districts_l = {d.lower() for d in db_districts}
         for dist in db_districts:

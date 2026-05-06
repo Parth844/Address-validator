@@ -6,6 +6,7 @@ import streamlit as st
 import json
 import time
 from src.predict import predict, predict_batch
+from src.pincode_lookup import lookup_pincode, lookup_pincode_districts
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -282,28 +283,53 @@ tab_single, tab_batch = st.tabs(["Single address", "Batch validation"])
 
 with tab_single:
 
-    # Example loaders
-    col_ex1, col_ex2, col_ex3 = st.columns(3)
-    with col_ex1:
-        if st.button("+ valid example", use_container_width=True):
-            import random
-            st.session_state["address_input"] = random.choice(VALID_EXAMPLES)
-    with col_ex2:
-        if st.button("+ invalid example", use_container_width=True):
-            import random
-            st.session_state["address_input"] = random.choice(INVALID_EXAMPLES)
-    with col_ex3:
-        if st.button("+ mismatch example", use_container_width=True):
-            import random
-            st.session_state["address_input"] = random.choice(MISMATCH_EXAMPLES)
+    st.markdown("Enter the shipping details below for validation.")
 
-    address = st.text_area(
-        "Postal address",
-        key="address_input",
-        height=100,
-        placeholder="e.g. Flat 204, Sunrise Apartments, MG Road, Bangalore, Karnataka 560001",
-        label_visibility="collapsed",
-    )
+    # Helper for auto-fill
+    def on_pincode_change():
+        p = st.session_state.pincode.strip()
+        if len(p) == 6 and p.isdigit():
+            states = lookup_pincode(p)
+            districts = lookup_pincode_districts(p)
+            if states:
+                st.session_state.state = states[0]
+            if districts:
+                options = sorted([d.title() for d in districts])
+                st.session_state.city_options = options
+                st.session_state.city = options[0]
+            else:
+                st.session_state.city_options = []
+
+    # Multi-field Input Form
+    row1_col1, row1_col2 = st.columns(2)
+    with row1_col1:
+        st.markdown("Address <span style='color:#ff4b4b'>*</span>", unsafe_allow_html=True)
+        addr1 = st.text_area("Address*", placeholder="Shipping Address", key="addr1", height=100, label_visibility="collapsed")
+    with row1_col2:
+        st.markdown("Address 2 (Optional)", unsafe_allow_html=True)
+        addr2 = st.text_area("Address 2 (Optional)", placeholder="Shipping Address 2", key="addr2", height=100, label_visibility="collapsed")
+
+    st.markdown("Pincode <span style='color:#ff4b4b'>*</span>", unsafe_allow_html=True)
+    pincode = st.text_input("Pincode*", placeholder="Enter pincode", key="pincode", label_visibility="collapsed", on_change=on_pincode_change)
+
+    row3_col1, row3_col2 = st.columns(2)
+    with row3_col1:
+        st.markdown("City <span style='color:#ff4b4b'>*</span>", unsafe_allow_html=True)
+        city_opts = st.session_state.get("city_options", [])
+        if len(city_opts) > 1:
+            city = st.selectbox("City*", options=city_opts, key="city", label_visibility="collapsed")
+        else:
+            city = st.text_input("City*", placeholder="Enter city", key="city", label_visibility="collapsed")
+            
+    with row3_col2:
+        st.markdown("State <span style='color:#ff4b4b'>*</span>", unsafe_allow_html=True)
+        state = st.text_input("State*", placeholder="Enter state", key="state", label_visibility="collapsed")
+
+    # Combine for prediction
+    address_parts = [addr1, addr2, city, state]
+    address = ", ".join([p for p in address_parts if p and p.strip()])
+    if pincode:
+        address += f" {pincode}"
 
     char_count = len(address) if address else 0
     st.caption(f"{char_count} chars")
@@ -314,11 +340,13 @@ with tab_single:
             "validate address",
             type="primary",
             use_container_width=True,
-            disabled=not bool(address and address.strip()),
+            disabled=not bool(addr1.strip() and pincode.strip() and city.strip() and state.strip()),
         )
     with col_clear:
         if st.button("clear", use_container_width=True):
-            st.session_state["address_input"] = ""
+            for k in ["addr1", "addr2", "pincode", "city", "state"]:
+                st.session_state[k] = ""
+            st.session_state["city_options"] = []
             st.rerun()
 
     if validate_clicked:

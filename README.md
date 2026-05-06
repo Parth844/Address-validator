@@ -150,6 +150,39 @@ The `app.py` provides:
 - **Confidence Score & Reason**: Visual indicators of model confidence and rule evaluation
 - **Smart Fix / Recommendations**: Displays automatic address suggestions in case of mismatches
 
+## 🌐 Backend API (FastAPI)
+
+If you want to use this project as a backend service for other applications:
+
+### 1. Run the API Locally
+```bash
+python api.py
+```
+The API will be available at `http://localhost:8000`.
+
+### 2. API Endpoints
+- **GET `/`**: Health check.
+- **POST `/validate`**: Validate a single address.
+  - Body: `{"address": "string"}`
+- **POST `/validate_batch`**: Validate multiple addresses.
+  - Body: `{"addresses": ["addr1", "addr2"]}`
+
+### 3. Interactive Documentation
+Once the API is running, you can access the interactive Swagger docs at:
+`http://localhost:8000/docs`
+
+## 🐳 Docker Deployment
+
+The project is containerized for easy deployment to cloud platforms (AWS, GCP, etc.):
+
+```bash
+# Build the image
+docker build -t address-validator-api .
+
+# Run the container
+docker run -p 8000:8000 address-validator-api
+```
+
 ## 🔐 Data Privacy
 
 - No personal data is stored

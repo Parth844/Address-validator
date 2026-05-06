@@ -8,26 +8,35 @@ df = pd.read_csv(DATA_PATH, dtype={"pincode": str})
 # Create lookup
 PINCODE_DB = df.groupby("pincode")["state"].apply(list).to_dict()
 
-PINCODE_TO_DISTRICTS = {}
-ALL_DISTRICTS = set()
+PINCODE_TO_CITIES = {}
+ALL_LOCATIONS = set()
 
+df["city"] = df["city"].fillna("").astype(str).str.lower().str.strip()
 df["district"] = df["district"].fillna("").astype(str).str.lower().str.strip()
 df["pincode"] = df["pincode"].fillna("").astype(str).str.strip()
 
-for p, d in zip(df["pincode"], df["district"]):
-    if not p or not d:
-        continue
-    if p not in PINCODE_TO_DISTRICTS:
-        PINCODE_TO_DISTRICTS[p] = set()
-    PINCODE_TO_DISTRICTS[p].add(d)
-    ALL_DISTRICTS.add(d)
+def clean_location(name):
+    """Remove ' b.o', ' s.o', ' h.o' and extra dots/spaces."""
+    name = name.replace(" b.o", "").replace(" s.o", "").replace(" h.o", "")
+    name = name.replace(".bo", "").replace(".so", "").replace(".ho", "")
+    return name.strip()
 
-    # Add individual words if district has multiple words, except for stopwords
-    words = [w for w in d.split() if w not in {"urban", "rural", "east", "west", "north", "south", "central"}]
-    for w in words:
-        if len(w) >= 3:
-            ALL_DISTRICTS.add(w)
-            PINCODE_TO_DISTRICTS[p].add(w)
+for p, c, d in zip(df["pincode"], df["city"], df["district"]):
+    if not p:
+        continue
+    if p not in PINCODE_TO_CITIES:
+        PINCODE_TO_CITIES[p] = set()
+    
+    # Clean city name (which contains office name in this dataset)
+    cleaned_c = clean_location(c)
+    if cleaned_c:
+        PINCODE_TO_CITIES[p].add(cleaned_c)
+        ALL_LOCATIONS.add(cleaned_c)
+    
+    # Also keep district as a fallback location
+    if d:
+        PINCODE_TO_CITIES[p].add(d)
+        ALL_LOCATIONS.add(d)
 
 ADDITIONAL_CITIES = {
     "mumbai", "pune", "nagpur", "nashik", "thane", "aurangabad", "solapur",
@@ -56,7 +65,7 @@ ADDITIONAL_CITIES = {
 }
 
 for c in ADDITIONAL_CITIES:
-    ALL_DISTRICTS.add(c)
+    ALL_LOCATIONS.add(c)
 
 CITY_STATE_TO_PINCODE = {}
 df["state"] = df["state"].fillna("").astype(str).str.lower().str.strip()
@@ -80,9 +89,9 @@ def lookup_pincode(pincode: str):
 
 def lookup_pincode_districts(pincode: str):
     """
-    Returns set of districts for a pincode
+    Returns set of cities/districts for a pincode
     """
-    return PINCODE_TO_DISTRICTS.get(pincode, set())
+    return PINCODE_TO_CITIES.get(pincode, set())
 
 
 def validate_pincode_against_address(pincode: str, address: str):
